@@ -1,4 +1,4 @@
-Shader "Custom/CloudShader"
+Shader "Custom/CloudShaderHLSL"
 {
     Properties
     {
@@ -47,8 +47,9 @@ Shader "Custom/CloudShader"
                 float4 positionCS : SV_POSITION;
                 float2 uv : TEXCOORD0;
                 float3 objectPos : TEXCOORD1;
-                float3 objectSpaceLightDir : TEXCOORD2;
-                float4 positionNDC : TEXCOORD3;
+                float3 objectSpaceViewDir : TEXCOORD2;
+                float3 objectSpaceLightDir : TEXCOORD3;
+                float4 positionNDC : TEXCOORD4;
             };
 
             TEXTURE2D(_CameraOpaqueTexture);
@@ -185,11 +186,16 @@ Shader "Custom/CloudShader"
                 Varyings output;
                 output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
                 output.uv = input.uv.xy * _MainTex_ST.xy + _MainTex_ST.zw;
+                
+                // Keep the object position as-is without scaling
                 output.objectPos = input.positionOS.xyz;
                 
-                // Get main directional light direction from HDRP
-                float3 worldSpaceLightDir = -_DirectionalLightDatas[0].forward.xyz;
-                output.objectSpaceLightDir = normalize(mul((float3x3)UNITY_MATRIX_I_M, worldSpaceLightDir));
+                // Get object space view direction
+                float3 objectSpaceViewPos = mul(UNITY_MATRIX_I_M, float4(_WorldSpaceCameraPos.xyz, 1.0)).xyz;
+                output.objectSpaceViewDir = normalize(objectSpaceViewPos - input.positionOS.xyz);
+                
+                // Get light direction
+                output.objectSpaceLightDir = normalize(mul((float3x3)UNITY_MATRIX_I_M, -_DirectionalLightDatas[0].forward.xyz));
                 
                 // Compute NDC position for screen UV calculation
                 output.positionNDC = output.positionCS * 0.5f;
@@ -201,6 +207,7 @@ Shader "Custom/CloudShader"
             
             float4 frag(Varyings input) : SV_Target
             {
+                // Use object space view position
                 float3 ro = mul(UNITY_MATRIX_I_M, float4(_WorldSpaceCameraPos.xyz, 1.0)).xyz;
                 float3 rd = normalize(input.objectPos - ro);
 
@@ -213,7 +220,7 @@ Shader "Custom/CloudShader"
 
                 float4 res = raymarch(ro, rd, input.objectSpaceLightDir, offset);
 
-                // Sample background using NDC-derived UVs
+                // Sample background colour using NDC-derived UVs to get rid of dark ring
                 float3 backgroundColor = SAMPLE_TEXTURE2D(_CameraOpaqueTexture, sampler_CameraOpaqueTexture, screenUV).rgb;
                 float3 finalColor = backgroundColor * (1.0 - res.a) + res.rgb;
                 
