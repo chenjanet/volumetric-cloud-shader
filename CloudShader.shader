@@ -4,7 +4,6 @@ Shader "Custom/CloudShader"
     {
         _SDFTex ("SDF Texture", 3D) = "white" {}
         _MainTex ("Texture", 2D) = "white" {}
-        _NoiseTex ("Noise Texture", 2D) = "white" {}
         _BlueNoise ("Blue Noise Texture", 2D) = "white" {}
         _NoiseScale ("Noise Scale", Float) = 1.0
         _CloudDensity ("Cloud Density", Range(0, 2)) = 1.0
@@ -15,6 +14,7 @@ Shader "Custom/CloudShader"
         _NoiseStrength ("Noise Strength", Range(0, 1)) = 0.3
         _CloudSpeed ("Cloud Speed", Range(0, 2)) = 0.5
         _SunDirection ("Sun Direction", Vector) = (1,0,0) 
+        _CloudFrameCount ("Cloud Frame Count", Integer) = 0
     }
     
     SubShader
@@ -55,8 +55,6 @@ Shader "Custom/CloudShader"
             sampler2D _MainTex;
             float4 _MainTex_ST;
 
-            sampler2D _NoiseTex;
-
             sampler2D _BlueNoise;
 
             sampler3D _SDFTex;
@@ -71,10 +69,11 @@ Shader "Custom/CloudShader"
             float _NoiseStrength;
 
             float _CloudSpeed;
-
             bool _DebugSDF;
 
             float3 _SunDirection;
+
+            int _CloudFrameCount;
             
             #define MAX_STEPS 100
             #define MARCH_SIZE 0.1
@@ -85,19 +84,37 @@ Shader "Custom/CloudShader"
                 return tex3D(_SDFTex, uv).r;
             }
 
+           // hash function for procedurally-generated noise
+            float hash(float3 p) {
+                p = frac(p * 0.3183099 + 0.1);
+                p *= 17.0;
+                return frac(p.x * p.y * p.z * (p.x + p.y + p.z));
+            }
+
+            // procedurally-generated noise (instead of sampling from a noise texture)
             float noise(float3 x) {
                 float3 p = floor(x);
                 float3 f = frac(x);
-                float3 u = f * f * (3. - 2. * f);
-
-                float2 uv = (p.xy + float2(37.0, 239.0) * p.z) + u.xy;
-                float4 tex = tex2Dlod(_NoiseTex, float4((uv + 0.5) / 256.0, 0, 0));
-
-                return lerp( tex.x, tex.y, u.z ) * 2.0 - 1.0;
+                f = f * f * (3.0 - 2.0 * f);
+                
+                float n = p.x + p.y * 157.0 + 113.0 * p.z;
+                return lerp(
+                    lerp(
+                        lerp(hash(p + float3(0, 0, 0)), hash(p + float3(1, 0, 0)), f.x),
+                        lerp(hash(p + float3(0, 1, 0)), hash(p + float3(1, 1, 0)), f.x),
+                        f.y
+                    ),
+                    lerp(
+                        lerp(hash(p + float3(0, 0, 1)), hash(p + float3(1, 0, 1)), f.x),
+                        lerp(hash(p + float3(0, 1, 1)), hash(p + float3(1, 1, 1)), f.x),
+                        f.y
+                    ),
+                    f.z
+                ) * 2.0 - 1.0;
             }
 
             float fbm(float3 p) {
-                float3 q = p + _Time.x * 0.5 * float3(1.0, -0.2, -1.0);
+                float3 q = p + _Time.y * _CloudSpeed * float3(1.0, -0.2, -1.0);
 
                 float f = 0.0;
                 float scale = 0.5;
@@ -151,9 +168,10 @@ Shader "Custom/CloudShader"
                 }
 
                 float depth = 0.0;
-                depth += MARCH_SIZE * (1.0 + offset * 0.2);
+                depth += MARCH_SIZE * offset;
                 float3 p = rayOrigin + depth * rayDirection;
-                float3 sunDirection = normalize(mul((float3x3)unity_WorldToObject, _WorldSpaceLightPos0.xyz));
+
+                float3 sunDirection = normalize(_SunDirection);
                 
                 float4 res = float4(0.0, 0.0, 0.0, 0.0);
                 
@@ -174,7 +192,7 @@ Shader "Custom/CloudShader"
                         res += color * transmittance;
                     }
                     
-                    depth += MARCH_SIZE * (1.0 + offset * 0.1);
+                    depth += MARCH_SIZE;
                     p = rayOrigin + depth * rayDirection;
                 }
                 
@@ -200,17 +218,12 @@ Shader "Custom/CloudShader"
                 float3 ro = mul(unity_WorldToObject, float4(_WorldSpaceCameraPos, 1.0)).xyz;
                 float3 rd = normalize(i.objectPos - ro);
 
-                float timeOffset = _Time.y * _CloudSpeed;
-                timeOffset = frac(timeOffset);
-
-                float2 pixelCoord = i.vertex.xy;
-                float blueNoise = tex2D(_BlueNoise, pixelCoord / 1024.0).r;
-                float offset = frac(blueNoise + timeOffset);
+                float blueNoise = tex2D(_BlueNoise, i.vertex.xy / 1024.0).r;
+                float offset = frac(blueNoise + float(_CloudFrameCount % 32) / sqrt(0.5));
 
                 float4 res = raymarch(ro, rd, offset);
 
-                float2 grabUV = i.grabPos.xy / i.grabPos.w;
-                float3 backgroundColor = UNITY_SAMPLE_SCREENSPACE_TEXTURE(_CameraOpaqueTexture, grabUV).rgb;
+                float3 backgroundColor = UNITY_SAMPLE_SCREENSPACE_TEXTURE(_CameraOpaqueTexture, i.grabPos.xy / i.grabPos.w).rgb;
                 float3 finalColor = backgroundColor * (1.0 - res.a) + res.rgb;
                 
                 return float4(finalColor, res.a);

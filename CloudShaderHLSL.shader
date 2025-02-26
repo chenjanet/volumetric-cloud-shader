@@ -4,7 +4,6 @@ Shader "Custom/CloudShaderHLSL"
     {
         _SDFTex ("SDF Texture", 3D) = "white" {}
         _MainTex ("Texture", 2D) = "white" {}
-        _NoiseTex ("Noise Texture", 2D) = "white" {}
         _BlueNoise ("Blue Noise Texture", 2D) = "white" {}
         _NoiseScale ("Noise Scale", Float) = 1.0
         _CloudDensity ("Cloud Density", Range(0, 2)) = 1.0
@@ -14,6 +13,7 @@ Shader "Custom/CloudShaderHLSL"
         _SDFStrength ("SDF Strength", Range(1, 5)) = 3.0
         _NoiseStrength ("Noise Strength", Range(0, 1)) = 0.3
         _CloudSpeed ("Cloud Speed", Range(0, 2)) = 0.5
+        _CloudFrameCount ("Cloud Frame Count", Integer) = 0
     }
     
     SubShader
@@ -59,9 +59,6 @@ Shader "Custom/CloudShaderHLSL"
             SAMPLER(sampler_MainTex);
             float4 _MainTex_ST;
 
-            TEXTURE2D(_NoiseTex);
-            SAMPLER(sampler_NoiseTex);
-
             TEXTURE2D(_BlueNoise);
             SAMPLER(sampler_BlueNoise);
 
@@ -79,28 +76,48 @@ Shader "Custom/CloudShaderHLSL"
 
             float _CloudSpeed;
             int _DebugSDF;
+
+            int _CloudFrameCount;
             
-            #define MAX_STEPS 100
-            #define MARCH_SIZE 0.1
+            #define MAX_STEPS 80
+            #define MARCH_SIZE 0.16
             
             float sampleSDF(float3 p) {
                 float3 uv = p + 0.5;
                 return SAMPLE_TEXTURE3D(_SDFTex, sampler_SDFTex, uv).r;
             }
 
+            // hash function for procedurally-generated noise
+            float hash(float3 p) {
+                p = frac(p * 0.3183099 + 0.1);
+                p *= 17.0;
+                return frac(p.x * p.y * p.z * (p.x + p.y + p.z));
+            }
+
+            // procedurally-generated noise (instead of sampling from a noise texture)
             float noise(float3 x) {
                 float3 p = floor(x);
                 float3 f = frac(x);
-                float3 u = f * f * (3.0 - 2.0 * f);
-
-                float2 uv = (p.xy + float2(37.0, 239.0) * p.z) + u.xy;
-                float4 tex = SAMPLE_TEXTURE2D_LOD(_NoiseTex, sampler_NoiseTex, (uv + 0.5) / 256.0, 0);
-
-                return lerp(tex.x, tex.y, u.z) * 2.0 - 1.0;
+                f = f * f * (3.0 - 2.0 * f);
+                
+                float n = p.x + p.y * 157.0 + 113.0 * p.z;
+                return lerp(
+                    lerp(
+                        lerp(hash(p + float3(0, 0, 0)), hash(p + float3(1, 0, 0)), f.x),
+                        lerp(hash(p + float3(0, 1, 0)), hash(p + float3(1, 1, 0)), f.x),
+                        f.y
+                    ),
+                    lerp(
+                        lerp(hash(p + float3(0, 0, 1)), hash(p + float3(1, 0, 1)), f.x),
+                        lerp(hash(p + float3(0, 1, 1)), hash(p + float3(1, 1, 1)), f.x),
+                        f.y
+                    ),
+                    f.z
+                ) * 2.0 - 1.0;
             }
 
             float fbm(float3 p) {
-                float3 q = p + _Time.y * 0.5 * float3(1.0, -0.2, -1.0);
+                float3 q = p + _Time.y * _CloudSpeed * float3(1.0, -0.2, -1.0);
 
                 float f = 0.0;
                 float scale = 0.5;
@@ -153,7 +170,7 @@ Shader "Custom/CloudShaderHLSL"
                 }
 
                 float depth = 0.0;
-                depth += MARCH_SIZE * (1.0 + offset * 0.2);
+                depth += MARCH_SIZE * offset;
                 float3 p = rayOrigin + depth * rayDirection;
                 
                 float4 res = float4(0.0, 0.0, 0.0, 0.0);
@@ -174,7 +191,7 @@ Shader "Custom/CloudShaderHLSL"
                         res += color * transmittance;
                     }
                     
-                    depth += MARCH_SIZE * (1.0 + offset * 0.1);
+                    depth += MARCH_SIZE;
                     p = rayOrigin + depth * rayDirection;
                 }
                 
@@ -211,12 +228,10 @@ Shader "Custom/CloudShaderHLSL"
                 float3 ro = mul(UNITY_MATRIX_I_M, float4(_WorldSpaceCameraPos.xyz, 1.0)).xyz;
                 float3 rd = normalize(input.objectPos - ro);
 
-                float timeOffset = _Time.y * _CloudSpeed;
-                timeOffset = frac(timeOffset);
-
                 float2 screenUV = input.positionNDC.xy / input.positionNDC.w;
+                
                 float blueNoise = SAMPLE_TEXTURE2D(_BlueNoise, sampler_BlueNoise, input.positionCS.xy / 1024.0).r;
-                float offset = frac(blueNoise + timeOffset);
+                float offset = frac(blueNoise * 2.4 + float(_CloudFrameCount % 32) / sqrt(0.5));
 
                 float4 res = raymarch(ro, rd, input.objectSpaceLightDir, offset);
 
