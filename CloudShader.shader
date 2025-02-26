@@ -13,8 +13,7 @@ Shader "Custom/CloudShader"
         _SDFStrength ("SDF Strength", Range(1, 5)) = 3.0
         _NoiseStrength ("Noise Strength", Range(0, 1)) = 0.3
         _CloudSpeed ("Cloud Speed", Range(0, 2)) = 0.5
-        _SunDirection ("Sun Direction", Vector) = (1,0,0) 
-        _CloudFrameCount ("Cloud Frame Count", Integer) = 0
+        _SunDirection ("Sun Direction", Vector) = (1,0,0)
     }
     
     SubShader
@@ -72,8 +71,6 @@ Shader "Custom/CloudShader"
             bool _DebugSDF;
 
             float3 _SunDirection;
-
-            int _CloudFrameCount;
             
             #define MAX_STEPS 100
             #define MARCH_SIZE 0.1
@@ -218,8 +215,9 @@ Shader "Custom/CloudShader"
                 float3 ro = mul(unity_WorldToObject, float4(_WorldSpaceCameraPos, 1.0)).xyz;
                 float3 rd = normalize(i.objectPos - ro);
 
+                float timeOffset = frac(_Time.y * 60);
                 float blueNoise = tex2D(_BlueNoise, i.vertex.xy / 1024.0).r;
-                float offset = frac(blueNoise + float(_CloudFrameCount % 32) / sqrt(0.5));
+                float offset = frac(blueNoise + timeOffset);
 
                 float4 res = raymarch(ro, rd, offset);
 

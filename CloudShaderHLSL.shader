@@ -13,7 +13,6 @@ Shader "Custom/CloudShaderHLSL"
         _SDFStrength ("SDF Strength", Range(1, 5)) = 3.0
         _NoiseStrength ("Noise Strength", Range(0, 1)) = 0.3
         _CloudSpeed ("Cloud Speed", Range(0, 2)) = 0.5
-        _CloudFrameCount ("Cloud Frame Count", Integer) = 0
     }
     
     SubShader
@@ -76,8 +75,6 @@ Shader "Custom/CloudShaderHLSL"
 
             float _CloudSpeed;
             int _DebugSDF;
-
-            int _CloudFrameCount;
             
             #define MAX_STEPS 80
             #define MARCH_SIZE 0.16
@@ -230,8 +227,9 @@ Shader "Custom/CloudShaderHLSL"
 
                 float2 screenUV = input.positionNDC.xy / input.positionNDC.w;
                 
+                float timeOffset = frac(_Time.y * 60);
                 float blueNoise = SAMPLE_TEXTURE2D(_BlueNoise, sampler_BlueNoise, input.positionCS.xy / 1024.0).r;
-                float offset = frac(blueNoise * 2.4 + float(_CloudFrameCount % 32) / sqrt(0.5));
+                float offset = frac(blueNoise * 2.4 + timeOffset);
 
                 float4 res = raymarch(ro, rd, input.objectSpaceLightDir, offset);
 
