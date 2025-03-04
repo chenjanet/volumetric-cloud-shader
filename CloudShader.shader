@@ -9,7 +9,7 @@ Shader "Custom/CloudShader"
         _CloudDensity ("Cloud Density", Range(0, 2)) = 1.0
         _FadeStart ("Fade Start", Range(0.0, 1.0)) = 0.3
         _FadeEnd ("Fade End", Range(0.0, 1.0)) = 0.5
-        _DebugSDF ("Debug SDF", Integer) = 0
+        [Toggle]_DebugSDF ("Debug SDF", Integer) = 0
         _SDFStrength ("SDF Strength", Range(1, 5)) = 3.0
         _NoiseStrength ("Noise Strength", Range(0, 1)) = 0.3
         _CloudSpeed ("Cloud Speed", Range(0, 2)) = 0.5
